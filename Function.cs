@@ -1,34 +1,45 @@
-using System.Threading.Tasks;
+using Google.Cloud.Functions.Framework;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Azure.WebJobs.Extensions.Http;
-using Microsoft.Azure.WebJobs;
 using Microsoft.Extensions.Logging;
 using System.IO;
-using Newtonsoft.Json;
+using System.Text.Json;
+using System.Threading.Tasks;
 
+namespace SimpleHttpFunction;
 
-public class Function
+public class Function : IHttpFunction
 {
-    private readonly ILogger<Function> _logger;
+    private readonly ILogger _logger;
 
-    public Function(ILogger<Function> logger)
-    {
+    public Function(ILogger<Function> logger) =>
         _logger = logger;
-    }
 
-    public async Task<IActionResult> Run(
-        [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req)
+    public async Task HandleAsync(HttpContext context)
     {
-        _logger.LogInformation("C# HTTP trigger function processed a request.");
+        HttpRequest request = context.Request;
+        // Check URL parameters for "message" field
+        string message = request.Query["message"];
 
-        string name = req.Query["name"];
-        string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-        dynamic data = JsonConvert.DeserializeObject(requestBody);
-        name ??= data?.name;
+        // If there's a body, parse it as JSON and check for "message" field.
+        using TextReader reader = new StreamReader(request.Body);
+        string text = await reader.ReadToEndAsync();
+        if (text.Length > 0)
+        {
+            try
+            {
+                JsonElement json = JsonSerializer.Deserialize<JsonElement>(text);
+                if (json.TryGetProperty("message", out JsonElement messageElement) &&
+                    messageElement.ValueKind == JsonValueKind.String)
+                {
+                    message = messageElement.GetString();
+                }
+            }
+            catch (JsonException parseException)
+            {
+                _logger.LogError(parseException, "Error parsing JSON request");
+            }
+        }
 
-        return name != null
-            ? (ActionResult)new OkObjectResult($"Hello, {name}")
-            : new BadRequestObjectResult("Please pass a name on the query string or in the request body");
+        await context.Response.WriteAsync(message ?? "Hello World!");
     }
 }
